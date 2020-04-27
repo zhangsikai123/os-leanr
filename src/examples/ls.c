@@ -14,7 +14,8 @@
 
 static bool
 list_dir (const char *dir, bool verbose) 
-{
+{ 
+  printf("hello there");
   int dir_fd = open (dir);
   if (dir_fd == -1) 
     {
@@ -69,7 +70,7 @@ main (int argc, char *argv[])
 {
   bool success = true;
   bool verbose = false;
-  
+  printf("hello there");
   if (argc > 1 && !strcmp (argv[1], "-l")) 
     {
       verbose = true;

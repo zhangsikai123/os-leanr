@@ -64,7 +64,6 @@ test_sleep (int thread_cnt, int iterations)
   msg ("thread 1 sleeps 20 ticks each time, and so on.");
   msg ("If successful, product of iteration count and");
   msg ("sleep duration will appear in nondescending order.");
-
   /* Allocate memory. */
   threads = malloc (sizeof *threads * thread_cnt);
   output = malloc (sizeof *output * iterations * thread_cnt * 2);

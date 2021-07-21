@@ -86,7 +86,7 @@ struct thread
     tid_t tid;                          /* Thread identifier. */
     enum thread_status status;          /* Thread state. */
     char name[16];                      /* Name (for debugging purposes). */
-    uint8_t *stack;                     /* Saved stack pointer. */
+    uint8_t *stack;                     /* Saved stack pointer. offset: 24(前面有三个 int8 field)*/
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
 

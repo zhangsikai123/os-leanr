@@ -1,10 +1,10 @@
 #include <string.h>
-#include <stdio.h> 
+#include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 
 typedef struct {
-	struct ode_t* next;
+	struct node_t* next;
 	int value;
 }node_t;
 
@@ -48,11 +48,12 @@ void append(list * l, int v){
 }
 
 int main(){
-	list * l = init_linkedlist(0);
+
+        list * l = init_linkedlist(0);
 	int i;
 	for(i = 1; i< 10; i++){
 		append(l, i);
 	}
 	print_list(l);
-}    
 
+}

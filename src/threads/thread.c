@@ -38,7 +38,7 @@ static struct thread *initial_thread;
 static struct lock tid_lock;
 
 /* Stack frame for kernel_thread(). */
-struct kernel_thread_frame 
+struct kernel_thread_frame
   {
     void *eip;                  /* Return address. */
     thread_func *function;      /* Function to call. */
@@ -83,9 +83,15 @@ static tid_t allocate_tid (void);
    thread_create().
 
    It is not safe to call thread_current() until this function
-   finishes. */
+   finishes.
+   初始化OS的主线程thread。
+   1. 确定中断被关闭
+   2. 初始化锁，就绪队列，全局队列
+   3. 初始化kernel线程的一些必要资源(stack, name, priority ....)
+   4. 将状态设置为running，放入全局队列中
+*/
 void
-thread_init (void) 
+thread_init (void)
 {
   ASSERT (intr_get_level () == INTR_OFF);
 
@@ -101,26 +107,31 @@ thread_init (void)
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
-   Also creates the idle thread. */
+   Also creates the idle thread. 标记线程开始，开启intr，启动线程调度
+   为什么要有idle_thread，查了网上资料，回答比较精彩。有性能方面，有人文哲学方面的。个人理解：
+   OS这里选择一个idle线程主要还是方便当有任务时cpu能够顺畅的切换过来，不需要经历大的状态切换。而且程序讲究前后逻辑一致。idle_thread能够让cpu在即使无任务可运行时，依然留在用户状态机之中，达到方便监控，方便管理，方便recover的目的.
+*/
 void
-thread_start (void) 
+thread_start (void)
 {
   /* Create the idle thread. */
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
-  thread_create ("idle", PRI_MIN, idle, &idle_started);
+  thread_create("idle", PRI_MIN, idle, &idle_started);
 
   /* Start preemptive thread scheduling. */
   intr_enable ();
 
-  /* Wait for the idle thread to initialize idle_thread. */
+  /* Wait for the idle thread to initialize idle_thread.
+     立刻出让cpu时间让其他线程执行任务
+   */
   sema_down (&idle_started);
 }
 
 /* Called by the timer interrupt handler at each timer tick.
    Thus, this function runs in an external interrupt context. */
 void
-thread_tick (void) 
+thread_tick (void)
 {
   struct thread *t = thread_current ();
 
@@ -141,7 +152,7 @@ thread_tick (void)
 
 /* Prints thread statistics. */
 void
-thread_print_stats (void) 
+thread_print_stats (void)
 {
   printf ("Thread: %lld idle ticks, %lld kernel ticks, %lld user ticks\n",
           idle_ticks, kernel_ticks, user_ticks);
@@ -161,10 +172,15 @@ thread_print_stats (void)
 
    The code provided sets the new thread's `priority' member to
    PRIORITY, but no actual priority scheduling is implemented.
-   Priority scheduling is the goal of Problem 1-3. */
+   Priority scheduling is the goal of Problem 1-3.
+   1. 初始化线程
+   2. start critical block
+   3. 初始化线程的stack: kf, ef, sf
+   4.
+ */
 tid_t
 thread_create (const char *name, int priority,
-               thread_func *function, void *aux) 
+               thread_func *function, void *aux)
 {
   struct thread *t;
   struct kernel_thread_frame *kf;
@@ -185,21 +201,29 @@ thread_create (const char *name, int priority,
   tid = t->tid = allocate_tid ();
 
   /* Prepare thread for first run by initializing its stack.
-     Do this atomically so intermediate values for the 'stack' 
+     Do this atomically so intermediate values for the 'stack'
      member cannot be observed. */
   old_level = intr_disable ();
 
-  /* Stack frame for kernel_thread(). */
-  kf = alloc_frame (t, sizeof *kf);
-  kf->eip = NULL;
+  /* Stack frame for kernel_thread().
+     线程stack bottom 保存kernel thread_frame的数据
+   */
+  kf = alloc_frame (t, sizeof *kf); // thread stack base 下移
+  kf->eip = NULL;  // 为啥是null，不是应该放置在function code的第一行指令下标处么？(extended instruction pointer)
   kf->function = function;
   kf->aux = aux;
 
-  /* Stack frame for switch_entry(). */
-  ef = alloc_frame (t, sizeof *ef);
-  ef->eip = (void (*) (void)) kernel_thread;
+  /* Stack frame for switch_entry().
+     kernel_thread_frame下面是switch_entry
 
-  /* Stack frame for switch_threads(). */
+   */
+  ef = alloc_frame (t, sizeof *ef);
+  ef->eip = (void (*) (void)) kernel_thread; //这是干啥？[方法参数返回值类型转换](https://stackoverflow.com/questions/30095846/meaning-of-void-void#_=_) 此处是将 kernel_thread方法转换为void * 方法参数为 void。
+
+  /* Stack frame for switch_threads().
+     switch_entry_frame下面是switch_thread_frame
+     这个sf 和 ef有啥区别?一个entry一个thread
+   */
   sf = alloc_frame (t, sizeof *sf);
   sf->eip = switch_entry;
   sf->ebp = 0;
@@ -217,9 +241,12 @@ thread_create (const char *name, int priority,
 
    This function must be called with interrupts turned off.  It
    is usually a better idea to use one of the synchronization
-   primitives in synch.h. */
+   primitives in synch.h.
+   该方法需要保证原子化
+   将方法状态设置为THREAD_BLOCKED, 交给shceduler
+*/
 void
-thread_block (void) 
+thread_block (void)
 {
   ASSERT (!intr_context ());
   ASSERT (intr_get_level () == INTR_OFF);
@@ -237,7 +264,7 @@ thread_block (void)
    it may expect that it can atomically unblock a thread and
    update other data. */
 void
-thread_unblock (struct thread *t) 
+thread_unblock (struct thread *t)
 {
   enum intr_level old_level;
 
@@ -252,7 +279,7 @@ thread_unblock (struct thread *t)
 
 /* Returns the name of the running thread. */
 const char *
-thread_name (void) 
+thread_name (void)
 {
   return thread_current ()->name;
 }
@@ -261,10 +288,10 @@ thread_name (void)
    This is running_thread() plus a couple of sanity checks.
    See the big comment at the top of thread.h for details. */
 struct thread *
-thread_current (void) 
+thread_current (void)
 {
   struct thread *t = running_thread ();
-  
+
   /* Make sure T is really a thread.
      If either of these assertions fire, then your thread may
      have overflowed its stack.  Each thread has less than 4 kB
@@ -278,7 +305,7 @@ thread_current (void)
 
 /* Returns the running thread's tid. */
 tid_t
-thread_tid (void) 
+thread_tid (void)
 {
   return thread_current ()->tid;
 }
@@ -286,7 +313,7 @@ thread_tid (void)
 /* Deschedules the current thread and destroys it.  Never
    returns to the caller. */
 void
-thread_exit (void) 
+thread_exit (void)
 {
   ASSERT (!intr_context ());
 
@@ -305,17 +332,18 @@ thread_exit (void)
 }
 
 /* Yields the CPU.  The current thread is not put to sleep and
-   may be scheduled again immediately at the scheduler's whim. */
+   may be scheduled again immediately at the scheduler's whim.
+   yield就是先创造critical block，在原子化的领域中，将cur_thread 存入ready_list的末位，调用schedule将cputime 让给下一个被选中的thread (为什么不是wait_list? 分别有哪些list？一共只有两个list，readylist和alllist。状态机有四种状态：ready，blocked，dying，running)
+ */
 void
-thread_yield (void) 
+thread_yield (void)
 {
   struct thread *cur = thread_current ();
   enum intr_level old_level;
-  
+  // 这个断言的意义到底在哪里？？
   ASSERT (!intr_context ());
-
   old_level = intr_disable ();
-  if (cur != idle_thread) 
+  if (cur != idle_thread)
     list_push_back (&ready_list, &cur->elem);
   cur->status = THREAD_READY;
   schedule ();
@@ -341,28 +369,28 @@ thread_foreach (thread_action_func *func, void *aux)
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
-thread_set_priority (int new_priority) 
+thread_set_priority (int new_priority)
 {
   thread_current ()->priority = new_priority;
 }
 
 /* Returns the current thread's priority. */
 int
-thread_get_priority (void) 
+thread_get_priority (void)
 {
   return thread_current ()->priority;
 }
 
 /* Sets the current thread's nice value to NICE. */
 void
-thread_set_nice (int nice UNUSED) 
+thread_set_nice (int nice UNUSED)
 {
   /* Not yet implemented. */
 }
 
 /* Returns the current thread's nice value. */
 int
-thread_get_nice (void) 
+thread_get_nice (void)
 {
   /* Not yet implemented. */
   return 0;
@@ -370,7 +398,7 @@ thread_get_nice (void)
 
 /* Returns 100 times the system load average. */
 int
-thread_get_load_avg (void) 
+thread_get_load_avg (void)
 {
   /* Not yet implemented. */
   return 0;
@@ -378,7 +406,7 @@ thread_get_load_avg (void)
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
-thread_get_recent_cpu (void) 
+thread_get_recent_cpu (void)
 {
   /* Not yet implemented. */
   return 0;
@@ -394,13 +422,13 @@ thread_get_recent_cpu (void)
    ready list.  It is returned by next_thread_to_run() as a
    special case when the ready list is empty. */
 static void
-idle (void *idle_started_ UNUSED) 
+idle (void *idle_started_ UNUSED)
 {
   struct semaphore *idle_started = idle_started_;
   idle_thread = thread_current ();
   sema_up (idle_started);
 
-  for (;;) 
+  for (;;)
     {
       /* Let someone else run. */
       intr_disable ();
@@ -424,7 +452,7 @@ idle (void *idle_started_ UNUSED)
 
 /* Function used as the basis for a kernel thread. */
 static void
-kernel_thread (thread_func *function, void *aux) 
+kernel_thread (thread_func *function, void *aux)
 {
   ASSERT (function != NULL);
 
@@ -435,7 +463,7 @@ kernel_thread (thread_func *function, void *aux)
 
 /* Returns the running thread. */
 struct thread *
-running_thread (void) 
+running_thread (void)
 {
   uint32_t *esp;
 
@@ -455,7 +483,11 @@ is_thread (struct thread *t)
 }
 
 /* Does basic initialization of T as a blocked thread named
-   NAME. */
+   NAME.
+   初始化线程: 传入thread 指针，名字和优先级
+   为线程结构预先清空一段内存（这里是为什么不得而知，貌似不请空也不会影响程序执行）
+   初始化: stack，magic number(这里就是放在指定分界区域的随机数，如果stackoverflow，该数据会被改写)
+*/
 static void
 init_thread (struct thread *t, const char *name, int priority)
 {
@@ -463,10 +495,10 @@ init_thread (struct thread *t, const char *name, int priority)
   ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
   ASSERT (name != NULL);
 
-  memset (t, 0, sizeof *t);
+   memset (t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
-  t->stack = (uint8_t *) t + PGSIZE;
+  t->stack = (uint8_t *) t + PGSIZE; // 线程的stack从顶部开始
   t->priority = priority;
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
@@ -475,7 +507,7 @@ init_thread (struct thread *t, const char *name, int priority)
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
    returns a pointer to the frame's base. */
 static void *
-alloc_frame (struct thread *t, size_t size) 
+alloc_frame (struct thread *t, size_t size)
 {
   /* Stack data is always allocated in word-size units. */
   ASSERT (is_thread (t));
@@ -491,7 +523,7 @@ alloc_frame (struct thread *t, size_t size)
    will be in the run queue.)  If the run queue is empty, return
    idle_thread. */
 static struct thread *
-next_thread_to_run (void) 
+next_thread_to_run (void)
 {
   if (list_empty (&ready_list))
     return idle_thread;
@@ -510,8 +542,8 @@ next_thread_to_run (void)
    switch_entry() (see switch.S).
 
    It's not safe to call printf() until the thread switch is
-   complete.  In practice that means that printf()s should be
-   added at the end of the function.
+   complete. 为什么？猜想是因为intr被关闭了。 In practice that means that printf()s should be
+   added at the end of the function. 如果在intr_disbale情况下printf会导致OS panic，断言失败
 
    After this function and its caller returns, the thread switch
    is complete. */
@@ -519,7 +551,7 @@ void
 thread_schedule_tail (struct thread *prev)
 {
   struct thread *cur = running_thread ();
-  
+
   ASSERT (intr_get_level () == INTR_OFF);
 
   /* Mark us as running. */
@@ -538,7 +570,7 @@ thread_schedule_tail (struct thread *prev)
      pull out the rug under itself.  (We don't free
      initial_thread because its memory was not obtained via
      palloc().) */
-  if (prev != NULL && prev->status == THREAD_DYING && prev != initial_thread) 
+  if (prev != NULL && prev->status == THREAD_DYING && prev != initial_thread)
     {
       ASSERT (prev != cur);
       palloc_free_page (prev);
@@ -551,26 +583,29 @@ thread_schedule_tail (struct thread *prev)
    thread to run and switches to it.
 
    It's not safe to call printf() until thread_schedule_tail()
-   has completed. */
+   has completed.
+   为什么schedule以及一些其他的类似kernel方法要通过禁止intr的方式来保证原子化，而不是用semaphore或者mutex？猜想:锁可以防止internal_intr，无法阻止external_intr
+   scheudle方法执行步骤：1.找到当前和正在执行线程 2.找到下一个需要cpu attention的线程 3. 判断是否需要contxt switch，需要就执行 4.
+*/
 static void
-schedule (void) 
+schedule (void)
 {
   struct thread *cur = running_thread ();
   struct thread *next = next_thread_to_run ();
   struct thread *prev = NULL;
-
+  // 这里为什么要断言，而不是直接自己尝试做一次set？
   ASSERT (intr_get_level () == INTR_OFF);
   ASSERT (cur->status != THREAD_RUNNING);
   ASSERT (is_thread (next));
 
   if (cur != next)
     prev = switch_threads (cur, next);
-  thread_schedule_tail (prev);
+  thread_schedule_tail (prev); // 为什么要单独分出一个方法而不放在一起？
 }
 
 /* Returns a tid to use for a new thread. */
 static tid_t
-allocate_tid (void) 
+allocate_tid (void)
 {
   static tid_t next_tid = 1;
   tid_t tid;

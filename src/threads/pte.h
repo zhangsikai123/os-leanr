@@ -8,13 +8,17 @@
 
    See vaddr.h for more generic functions and macros for virtual
    addresses.
-   
+
    Virtual addresses are structured as follows:
 
     31                  22 21                  12 11                   0
    +----------------------+----------------------+----------------------+
    | Page Directory Index |   Page Table Index   |    Page Offset       |
    +----------------------+----------------------+----------------------+
+   page table 是维护所有page的数据结构。抽象一点是一个map(map(page))的结构。
+   map的大小就是2**10个slots。page是4KB。所以32位的电脑的虚拟内存空间有4GB。随你玩儿。
+   这上面每一个地址都对应一个物理地址空间。
+
 */
 
 /* Page table index (bits 12:21). */
@@ -57,7 +61,14 @@ static inline uintptr_t pd_no (const void *va) {
    When a PDE or PTE is not "present", the other flags are
    ignored.
    A PDE or PTE that is initialized to 0 will be interpreted as
-   "not present", which is just fine. */
+   "not present", which is just fine.
+   使用额外的数据结构来描述每个page table的状态。分别为 PWUAD。
+   P指示是否present(在内存里还是swapped out了)
+   W 是否为读写还是只读
+   U 是给user/kernel都能用还是只能kernel用
+   A 指示该地址最近访问的状态 有3个bit可以用
+   D 指示该页是否为脏页
+*/
 #define PTE_FLAGS 0x00000fff    /* Flag bits. */
 #define PTE_ADDR  0xfffff000    /* Address bits. */
 #define PTE_AVL   0x00000e00    /* Bits available for OS use. */
@@ -104,4 +115,3 @@ static inline void *pte_get_page (uint32_t pte) {
 }
 
 #endif /* threads/pte.h */
-
